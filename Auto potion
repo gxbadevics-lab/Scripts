@@ -1,0 +1,276 @@
+
+
+if not ATConfig then
+    game.Players.LocalPlayer:Kick("Config is Missing!")
+    task.wait(120)
+    game:Shutdown()
+end
+
+print("Made by gxba")
+repeat task.wait(1) until game:IsLoaded() and game:GetService("ReplicatedStorage"):FindFirstChild("ClientModules") and game:GetService("ReplicatedStorage").ClientModules:FindFirstChild("Core") and game:GetService("ReplicatedStorage").ClientModules.Core:FindFirstChild("UIManager") and game:GetService("ReplicatedStorage").ClientModules.Core:FindFirstChild("UIManager").Apps:FindFirstChild("TransitionsApp") and game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("TransitionsApp") and game:GetService("Players").LocalPlayer.PlayerGui:FindFirstChild("TransitionsApp"):FindFirstChild("Whiteout")
+repeat task.wait(1) until game.Players and game.Players.LocalPlayer and game:GetService("Players").LocalPlayer.PlayerGui and game:GetService("Players").LocalPlayer.PlayerGui.AssetLoadUI and (game:GetService("Players").LocalPlayer.PlayerGui.AssetLoadUI.Enabled == false)
+task.wait(1)
+
+print("[1] Check Done")
+
+local RS = game:GetService("ReplicatedStorage")
+local ReplicatedStorage = RS
+local ClientData = require(RS.ClientModules.Core.ClientData)
+local RouterClient = require(RS.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient"))
+local Main_Menu = require(RS.ClientModules.Core.UIManager.Apps.MainMenuApp)
+local Player = game:GetService("Players").LocalPlayer
+local VirtualInputManager = game:GetService("VirtualInputManager")
+local HttpService = game:GetService("HttpService")
+
+local PetPotionEffectsDB = require(game:GetService("ReplicatedStorage").ClientDB.PetPotionEffectsDB)
+local current_potion_type = nil
+
+game.Players.LocalPlayer.Idled:Connect(function() 
+    game:GetService("VirtualUser"):Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame) 
+    task.wait(1)
+    game:GetService("VirtualUser"):Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame) 
+end)
+
+Player.PlayerGui.DialogApp.Enabled = false
+
+for i, v in pairs(debug.getupvalue(RouterClient.init, 7)) do
+    v.Name = i
+end
+
+function FindPetInInventory(petName, growthStage)
+    local inv = ClientData.get_data()[tostring(game.Players.LocalPlayer.UserId)].inventory.pets
+    local foundPets = {}
+    for unique, pet in pairs(inv) do
+        if pet.id == petName and (growthStage == nil or pet.properties.age == growthStage) then
+            foundPets[unique] = pet
+        end
+    end
+    return foundPets
+end
+
+function CountPetsByName(petName, growthStage)
+    local pets = FindPetInInventory(petName, growthStage)
+    local count = 0
+    for _, _ in pairs(pets) do
+        count = count + 1
+    end
+    return count
+end
+
+function HasPotionEffects(pet)
+    if not pet.properties or not pet.properties.potion_effects then return false end
+    for _, effect in pairs(pet.properties.potion_effects) do
+        if effect > 0 then
+            return true
+        end
+    end
+    return false
+end
+
+function ApplyPotion(petId, potionType)
+    local args = {
+        [1] = {
+            [1] = petId,
+            [2] = potionType
+        }
+    }
+    game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:ApplyPotionRequest"]:InvokeServer(unpack(args))
+    task.wait(1)
+end
+
+function GetPotionCount(potionType)
+    local inv = ClientData.get_data()[tostring(game.Players.LocalPlayer.UserId)].inventory.potions
+    local count = 0
+    for _, potion in pairs(inv) do
+        if potion.id == potionType then
+            count = count + potion.amount
+        end
+    end
+    return count
+end
+
+function MakeNeon(petName)
+    local fullGrownPets = FindPetInInventory(petName, "full grown")
+    local count = 0
+    local petIds = {}
+    for id, pet in pairs(fullGrownPets) do
+        if not HasPotionEffects(pet) then
+            table.insert(petIds, id)
+            count = count + 1
+            if count == 4 then
+                break
+            end
+        end
+    end
+    if #petIds == 4 then
+        local args = {
+            [1] = petIds
+        }
+        game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:MakeNeonRequest"]:InvokeServer(unpack(args))
+        task.wait(2)
+        return true
+    end
+    return false
+end
+
+function MakeMega(petName)
+    local neonPets = FindPetInInventory(petName, "neon")
+    local count = 0
+    local petIds = {}
+    for id, pet in pairs(neonPets) do
+        if not HasPotionEffects(pet) then
+            table.insert(petIds, id)
+            count = count + 1
+            if count == 4 then
+                break
+            end
+        end
+    end
+    if #petIds == 4 then
+        local args = {
+            [1] = petIds
+        }
+        game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:MakeMegaNeonRequest"]:InvokeServer(unpack(args))
+        task.wait(2)
+        return true
+    end
+    return false
+end
+
+function AgePet(petId)
+    local args = {
+        [1] = petId
+    }
+    game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:EquipPetRequest"]:InvokeServer(unpack(args))
+    task.wait(2)
+end
+
+function UnequipPet()
+    local args = {
+        [1] = {}
+    }
+    game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:EquipPetRequest"]:InvokeServer(unpack(args))
+    task.wait(1)
+end
+
+function FusionPets(petName)
+    local pets = FindPetInInventory(petName)
+    local petIds = {}
+    for id, _ in pairs(pets) do
+        table.insert(petIds, id)
+        if #petIds == 3 then
+            local args = {
+                [1] = petIds
+            }
+            game:GetService("ReplicatedStorage").API["game:GetService(\"ReplicatedStorage\").API.Pet:FusionRequest"]:InvokeServer(unpack(args))
+            task.wait(2)
+            return true
+        end
+    end
+    return false
+end
+
+function CheckAndApplyPotions(pet, rarity)
+    local requiredPotions = ATConfig.PotionRequirements[rarity]
+    if requiredPotions and GetPotionCount("aging") >= requiredPotions then
+        for i = 1, requiredPotions do
+            ApplyPotion(pet, "aging")
+        end
+        return true
+    end
+    return false
+end
+
+function FGPet(petName, rarity)
+    local inv = ClientData.get_data()[tostring(game.Players.LocalPlayer.UserId)].inventory.pets
+    for unique, pet in pairs(inv) do
+        if pet.id == petName and pet.properties.age ~= "full grown" and not HasPotionEffects(pet) then
+            if CheckAndApplyPotions(unique, rarity) then
+                print("Applied potions to", petName)
+                return true
+            else
+                AgePet(unique)
+                print("Aging pet:", petName)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function ProcessPet(petData)
+    local petName = petData.name
+    local rarity = petData.rarity
+    if ATConfig.Mode == "Goal" then
+        local megaCount = CountPetsByName(petName, "mega neon")
+        local neonCount = CountPetsByName(petName, "neon")
+        local normalCount = CountPetsByName(petName)
+        if megaCount < petData.megaGoal then
+            if not MakeMega(petName) then
+                if not MakeNeon(petName) then
+                    return FGPet(petName, rarity)
+                end
+            end
+        elseif neonCount < petData.neonGoal then
+            if not MakeNeon(petName) then
+                return FGPet(petName, rarity)
+            end
+        elseif normalCount < petData.normalGoal then
+            return FGPet(petName, rarity)
+        end
+    elseif ATConfig.Mode == "Max" then
+        if not MakeMega(petName) then
+            if not MakeNeon(petName) then
+                if ATConfig.FusionEnabled then
+                    if not FusionPets(petName) then
+                        return FGPet(petName, rarity)
+                    end
+                else
+                    return FGPet(petName, rarity)
+                end
+            end
+        end
+    end
+    return false
+end
+
+function MainLoop()
+    while true do
+        local didSomething = false
+        for _, petData in ipairs(ATConfig.PetsToAge) do
+            if ProcessPet(petData) then
+                didSomething = true
+            end
+        end
+        if not didSomething then
+            UnequipPet()
+            break
+        end
+        task.wait(1)
+    end
+end
+
+MainLoop()
+
+print("Ended")
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(1, 0, 1, 0)
+Frame.BackgroundColor3 = Color3.new(0, 0, 0)
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+
+local DoneText = Instance.new("TextLabel")
+DoneText.Size = UDim2.new(1, 0, 1, 0)
+DoneText.BackgroundTransparency = 1
+DoneText.Text = "DONE"
+DoneText.TextColor3 = Color3.new(1, 1, 1)
+DoneText.Font = Enum.Font.SourceSansBold
+DoneText.TextScaled = true
+DoneText.Parent = Frame
