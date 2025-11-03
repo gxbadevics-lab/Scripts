@@ -1,61 +1,66 @@
+-- full_hotdog_buyer.lua
+-- Expects an external config (not obfuscated) like:
+-- HOTDOG_CONFIG = { seller = "m4alt_1", price = 50 }
 
+-- === Internal constants ===
+local TOTAL_SPEND_PER_CYCLE = 150      -- internal: how much to spend each cycle (in bucks)
+local MIN_HUMAN_PAUSE = 10             -- seconds between individual buys
+local MAX_HUMAN_PAUSE = 15
+local CYCLE_BASE_WAIT = 120            -- base wait after a cycle (seconds)
+local CYCLE_JITTER_MAX = 15            -- additional random jitter (seconds)
 
+-- === Validate external config ===
 if type(HOTDOG_CONFIG) ~= "table" then
-    error("HOTDOG_CONFIG missing. Define HOTDOG_CONFIG = { seller = 'name', price = 50 } before running this script.")
+    error("HOTDOG_CONFIG missing. Define HOTDOG_CONFIG = { seller = 'name', price = 50 } before running.")
 end
 local SELLER_NAME = tostring(HOTDOG_CONFIG.seller or "")
-local UNIT_PRICE   = tonumber(HOTDOG_CONFIG.price or 0)
-if SELLER_NAME == "" or UNIT_PRICE <= 0 then
-    error("Invalid HOTDOG_CONFIG values. seller must be a username and price must be > 0.")
+local UNIT_PRICE = tonumber(HOTDOG_CONFIG.price or HOTDOG_CONFIG.unitPrice)
+if SELLER_NAME == "" or not UNIT_PRICE or UNIT_PRICE <= 0 then
+    error("Invalid HOTDOG_CONFIG. seller must be username, price must be > 0.")
 end
 
-
-math.randomseed(tick() % 2147483647)
+-- === Utilities ===
+math.randomseed(tick() % 2^31)
 local function humanPause()
-    -- internal human-like delay (kept inside main so can be obfuscated)
-    local low, high = 0.8, 2.3
-    task.wait(math.random( math.floor(low*100), math.floor(high*100) ) / 100)
+    local ms = math.random(math.floor(MIN_HUMAN_PAUSE*1000), math.floor(MAX_HUMAN_PAUSE*1000)) / 1000
+    task.wait(ms)
+end
+local function tinyPause()
+    task.wait(0.6 + (math.random() * 0.6))
 end
 
-
+-- === Startup checks (UI/assets/players) ===
 repeat task.wait(1) until game:IsLoaded()
     and game:GetService("ReplicatedStorage"):FindFirstChild("ClientModules")
-    and game:GetService("ReplicatedStorage").ClientModules:FindFirstChild("Core")
-    and game:GetService("ReplicatedStorage").ClientModules.Core:FindFirstChild("UIManager")
-    and game.Players.LocalPlayer.PlayerGui:FindFirstChild("TransitionsApp")
-    and game.Players.LocalPlayer.PlayerGui.TransitionsApp:FindFirstChild("Whiteout")
+    and game.Players.LocalPlayer
 
-repeat task.wait(1) until game.Players.LocalPlayer.PlayerGui:FindFirstChild("AssetLoadUI")
-    and (game.Players.LocalPlayer.PlayerGui.AssetLoadUI.Enabled == false)
+repeat task.wait(.5) until game.Players.LocalPlayer.PlayerGui and game.Players.LocalPlayer.PlayerGui:FindFirstChild("TransitionsApp") and game.Players.LocalPlayer.PlayerGui.TransitionsApp:FindFirstChild("Whiteout") or true
+repeat task.wait(.5) until game.Players.LocalPlayer.PlayerGui:FindFirstChild("AssetLoadUI") == nil or (game.Players.LocalPlayer.PlayerGui.AssetLoadUI.Enabled == false) or true
 
-print("[Loader] Basic UI checks passed")
+print("[Loader] Basic checks done")
 
-
-local RS = game:GetService("ReplicatedStorage")
-local ok, RouterClient = pcall(function()
-    return require(RS.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient"))
+-- === Attempt safe dehash (non-fatal) ===
+pcall(function()
+    local RS = game:GetService("ReplicatedStorage")
+    local ok, RouterClient = pcall(function()
+        return require(RS.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient"))
+    end)
+    if ok and type(RouterClient) == "table" then
+        local success, remoteMap = pcall(function() return getupvalue(RouterClient.init, 7) end)
+        if success and type(remoteMap) == "table" then
+            for name, remote in pairs(remoteMap) do
+                pcall(function() remote.Name = name end)
+            end
+            print("[Loader] Dehash complete")
+        else
+            warn("[Loader] Dehash: remote map not found")
+        end
+    end
 end)
 
-if ok and type(RouterClient) == "table" then
-    local remoteMap = nil
-    pcall(function()
-        remoteMap = getupvalue(RouterClient.init, 7)
-    end)
-    if type(remoteMap) == "table" then
-        for name, remote in pairs(remoteMap) do
-            -- protect with pcall in case of readonly
-            pcall(function() remote.Name = name end)
-        end
-        print("[Loader] Dehash complete")
-    else
-        warn("[Loader] Dehash: remote map not found (continuing anyway)")
-    end
-else
-    warn("[Loader] RouterClient require failed (continuing anyway)")
-end
-
-
+-- === Try to auto-enter (choose team / close UI / claim daily) - non-fatal ===
 pcall(function()
+    local RS = game:GetService("ReplicatedStorage")
     if RS:FindFirstChild("API") and RS.API:FindFirstChild("TeamAPI/ChooseTeam") then
         local args = { [1] = "Parents", [2] = { ["source_for_logging"] = "intro_sequence" } }
         pcall(function() RS.API["TeamAPI/ChooseTeam"]:InvokeServer(unpack(args)) end)
@@ -63,8 +68,8 @@ pcall(function()
 
     task.wait(1)
     if pcall(function() return RS.Fsys end) then
-        local success, ui = pcall(function() return require(RS.Fsys).load("UIManager") end)
-        if success and ui then
+        local ok, ui = pcall(function() return require(RS.Fsys).load("UIManager") end)
+        if ok and ui then
             pcall(function() ui.set_app_visibility("MainMenuApp", false) end)
             pcall(function() ui.set_app_visibility("NewsApp", false) end)
             pcall(function() ui.set_app_visibility("DialogApp", false) end)
@@ -77,93 +82,107 @@ pcall(function()
     end
 end)
 
-
+-- === Wait for character spawn (ensure LocalPlayer exists and has HRP) ===
 repeat task.wait() until game.Players.LocalPlayer and game.Players.LocalPlayer.Character and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 print("[Loader] Character ready")
 
-
+-- === Money reader function (uses provided ClientData method) ===
 local function getBucks()
-    local ok, value = pcall(function()
+    local ok, val = pcall(function()
         return tonumber(require(game.ReplicatedStorage:WaitForChild("ClientModules").Core.ClientData).get("money"))
     end)
     if not ok then
-        warn("[Money] Failed to read money via ClientData; returning 0")
+        warn("[Money] Failed to read money; returning 0")
         return 0
     end
-    return value or 0
+    return val or 0
 end
 
-
-
+-- === Buy remote getter (retries if missing) ===
 local function getBuyRemote()
-    if RS:FindFirstChild("API") then
-        local API = RS:WaitForChild("API")
-        if API:FindFirstChild("PlaceableToolAPI/BuyRefreshment") then
-            return API:WaitForChild("PlaceableToolAPI/BuyRefreshment")
-        end
+    local RS = game:GetService("ReplicatedStorage")
+    if not RS:FindFirstChild("API") then return nil end
+    local API = RS:WaitForChild("API")
+    if API:FindFirstChild("PlaceableToolAPI/BuyRefreshment") then
+        return API:WaitForChild("PlaceableToolAPI/BuyRefreshment")
     end
     return nil
 end
 
-local BUY_REMOTE = getBuyRemote()
-if not BUY_REMOTE then
-    warn("[Buy] BuyRefreshment remote not found. Script will attempt again at runtime.")
-end
-
-
+-- === Main buy loop ===
 task.spawn(function()
+    local BUY_REMOTE = getBuyRemote()
+
     while true do
-        -- buy until you cannot afford another unit
-        local boughtThisCycle = 0
-        while true do
+        local cycleSpent = 0
+        local maxBuysThisCycle = math.floor(TOTAL_SPEND_PER_CYCLE / UNIT_PRICE)
+        print(string.format("[Cycle] Starting. Target up to %d buys (unit=%d, targetSpend=%d)", maxBuysThisCycle, UNIT_PRICE, TOTAL_SPEND_PER_CYCLE))
+
+        while cycleSpent < TOTAL_SPEND_PER_CYCLE do
+            -- Check money
             local bucks = getBucks()
             if bucks < UNIT_PRICE then
-                -- not enough to buy a single unit: stop inner loop
+                print("[Cycle] Not enough bucks for another buy. Bucks:", bucks)
                 break
             end
 
-
+            -- Ensure buy remote available (try to reacquire)
             if not BUY_REMOTE then
                 BUY_REMOTE = getBuyRemote()
                 if not BUY_REMOTE then
-                    warn("[Buy] buy remote missing; aborting buying for this cycle")
+                    warn("[Buy] BuyRefreshment remote not found; aborting buys this cycle")
                     break
                 end
             end
 
+            -- Ensure seller exists in Players
+            local players = game:GetService("Players")
+            local sellerPlayer = players:FindFirstChild(SELLER_NAME)
+            if not sellerPlayer then
+                -- Wait briefly for player to appear; if still not found skip this buy attempt
+                sellerPlayer = players:FindFirstChild(SELLER_NAME) or players:WaitForChild(SELLER_NAME, 2)
+                if not sellerPlayer then
+                    warn("[Buy] Seller '" .. SELLER_NAME .. "' not found in server. Aborting cycle.")
+                    break
+                end
+            end
+
+            -- Perform buy in pcall
             local success, err = pcall(function()
-                -- build args exactly as provided earlier
                 local args = {
                     [1] = "hotdog_stand",
-                    [2] = game:GetService("Players"):WaitForChild(SELLER_NAME),
+                    [2] = sellerPlayer,
                     [3] = UNIT_PRICE
                 }
                 BUY_REMOTE:InvokeServer(unpack(args))
             end)
 
             if not success then
-                warn("[Buy] failed to InvokeServer:", err)
-                -- if remote fails, small pause then retry
-                task.wait(1.2)
+                warn("[Buy] InvokeServer failed:", err)
+                -- small backoff before retrying to avoid spam
+                tinyPause()
             else
-                boughtThisCycle = boughtThisCycle + 1
-                print(string.format("[Buy] bought #%d this cycle. Spent %d (unit=%d). Bucks left (approx): %s", boughtThisCycle, boughtThisCycle*UNIT_PRICE, UNIT_PRICE, tostring(getBucks())))
+                cycleSpent = cycleSpent + UNIT_PRICE
+                print(string.format("[Buy] Bought one. CycleSpent=%d. Bucks (approx) after buy: %s", cycleSpent, tostring(getBucks())))
             end
 
+            -- human pause between individual purchases (10-15s)
             humanPause()
+
+            -- safety check if we've reached theoretical max buys
+            if cycleSpent >= TOTAL_SPEND_PER_CYCLE then break end
         end
 
-        if boughtThisCycle == 0 then
-            print("[Buy] No purchases made this cycle (not enough funds or remote missing)")
+        if cycleSpent == 0 then
+            print("[Cycle] No purchases made this cycle (not enough funds or missing remote/seller).")
         else
-            print(string.format("[Buy] Cycle complete: bought %d items", boughtThisCycle))
+            print(string.format("[Cycle] Completed. Spent approximately %d this cycle.", cycleSpent))
         end
 
-        -- wait about 2 minutes before trying again, with a small random jitter
-        local base = 120
-        local jitter = math.random(0, 20) -- 0-20s jitter
-        local waitTime = base + jitter
-        print("[Buy] Waiting approximately "..waitTime.." seconds before next cycle")
+        -- Wait ~2 minutes + jitter before next cycle
+        local jitter = math.random(0, CYCLE_JITTER_MAX)
+        local waitTime = CYCLE_BASE_WAIT + jitter
+        print("[Cycle] Waiting " .. tostring(waitTime) .. " seconds until next cycle.")
         task.wait(waitTime)
     end
 end)
