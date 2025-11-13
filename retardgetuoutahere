@@ -7,16 +7,6 @@ local totalBucksSpent = 0
 local farming_pet_unique, second_farming_pet_unique = nil, nil
 
 -- MISSING FUNCTION PLACEHOLDERS
-local function goto_zone(zone)
-    print("📍 Would teleport to zone:", zone)
-    -- Add your actual zone navigation logic here
-end
-
-local function tp_main_map()
-    print("📍 Would teleport to main map")
-    -- Add your actual teleport logic here
-end
-
 local function SendInfoMessage(webhook, message)
     print("📧 Webhook Message:", message)
     -- Add your actual Discord webhook logic here
@@ -275,11 +265,8 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
     end
 
     for _, pet in pairs(playerPets) do
-        -- FIXED: Changed pet.unique ~= "practice_dog" to pet.kind ~= "practice_dog"
         if pet and pet.unique and pet.kind ~= "practice_dog" and not string.match(pet.kind or "", "_egg$") then
-            -- FIXED: Replaced 'continue' with proper Lua syntax
             if pet.unique == farming_pet_unique or pet.unique == second_farming_pet_unique then
-                -- Skip to next iteration (equivalent to continue)
                 goto continue
             end
             
@@ -309,17 +296,6 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
     end
 
     if total >= 5000 then
-        local success3 = pcall(function()
-            local args = {"Nursery"}
-            ReplicatedStorage:WaitForChild("API"):WaitForChild("LocationAPI/SetLocation"):FireServer(unpack(args))
-        end)
-        
-        if not success3 then
-            warn("⚠️ Failed to teleport to Nursery")
-            return
-        end
-        
-        task.wait(3)
         print("♻️ Recycling with", total, "points | Pets:", #chosen)
         
         if Config.RecycleWebhook and Config.RecycleWebhook ~= "" then
@@ -354,9 +330,7 @@ local function check_if_enough_point(ClientData)
         if Config.RecycleWebhook and Config.RecycleWebhook ~= "" then
             SendInfoMessage(Config.RecycleWebhook, "enough point for crystal egg, total point : " .. nigga)
         end
-        local args = {"Nursery"}
-        ReplicatedStorage:WaitForChild("API"):WaitForChild("LocationAPI/SetLocation"):FireServer(unpack(args))
-        task.wait(3)
+        
         local Recycle_unique = getFurnitureUnique_recycle_shit()
         local args = {
             Recycle_unique,
@@ -380,13 +354,7 @@ local function search_recycle_quest(ClientData)
         local name = data.entry_name
         if name == "pet_recycler_reward_ready" then
             pcall(function()
-                goto_zone("Main")
-                task.wait(1)
-                local args = {"Nursery"}
-                ReplicatedStorage:WaitForChild("API"):WaitForChild("LocationAPI/SetLocation"):FireServer(unpack(args))
-                task.wait(3)
                 local Recycle_unique = getFurnitureUnique_recycle_shit()
-                task.wait(1)
                 local args = {
                     Recycle_unique,
                     "UseBlock",
@@ -438,7 +406,6 @@ local function main_logic_recycle_shit(ClientData)
             end
         end
         task.wait(1)
-        tp_main_map()
     end
 end
 
