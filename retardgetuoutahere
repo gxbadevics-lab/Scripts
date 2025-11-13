@@ -6,10 +6,11 @@ local Players = game:GetService("Players")
 local totalBucksSpent = 0
 local farming_pet_unique, second_farming_pet_unique = nil, nil
 
--- Startup Sequence (your original code)
+-- Startup Sequence
 local function startupChecks()
     print("🔍 Starting startup checks...")
     
+    -- Wait for game to load completely
     repeat task.wait(1) until game:IsLoaded()
         and game:GetService("ReplicatedStorage"):FindFirstChild("ClientModules")
         and game:GetService("ReplicatedStorage").ClientModules:FindFirstChild("Core")
@@ -23,6 +24,7 @@ local function startupChecks()
 
     print("[1] Check Done")
 
+    -- Dehash Remotes
     local RS = game:GetService("ReplicatedStorage")
     local RouterClient = require(RS.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient"))
     for name, remote in pairs(getupvalue(RouterClient.init, 7)) do
@@ -30,6 +32,7 @@ local function startupChecks()
     end
     print("[Dehash Done]")
 
+    -- Enter Game (choose role, close UI, claim daily)
     local function enter_the_game()
         local args = {
             [1] = "Parents",
@@ -49,18 +52,20 @@ local function startupChecks()
     end
     enter_the_game()
 
+    -- Wait for character
     repeat task.wait() until game:IsLoaded()
         and game.Players.LocalPlayer.Character
         and game.Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
 
     print("Final Check Done")
     
+    -- Wait 20 seconds before starting recycler
     print("⏳ Waiting 20 seconds before starting recycler...")
     task.wait(20)
     print("🚀 Starting recycler automation...")
 end
 
--- Load required modules
+-- Load required modules after startup
 local function loadModules()
     local RouterClient = require(ReplicatedStorage.ClientModules.Core.RouterClient.RouterClient)
     local ClientData = require(ReplicatedStorage.ClientModules.Core.ClientData)
@@ -69,7 +74,7 @@ local function loadModules()
     return RouterClient, ClientData, PetRecyclerCalculator
 end
 
--- YOUR ORIGINAL FUNCTIONS (unchanged)
+-- Utility Functions
 local function isBusy(manager)
     local now = os.time()
     if manager.timestamp and manager.timestamp > now then
@@ -111,9 +116,91 @@ local function getFurnitureUnique_recycle_shit()
     return petRecycler and petRecycler:GetAttribute("furniture_unique") or nil
 end
 
+-- Skip Functions
+local function getSkipPrice(ClientData)
+    local success, manager = pcall(function()
+        return ClientData.get("pet_recycler_manager")
+    end)
+    if success and manager then
+        return manager["skip_price"] or 0
+    end
+    return 0
+end
+
+local function canSkipRecycler(ClientData)
+    if not Config.PayToSkip then
+        return false
+    end
+    
+    local skipPrice = getSkipPrice(ClientData)
+    
+    if skipPrice > Config.MaxBucksPerSkip then
+        print("❌ Skip price too high:", skipPrice, ">", Config.MaxBucksPerSkip)
+        return false
+    end
+    
+    local success, playerData = pcall(function()
+        return ClientData.get_data()[Players.LocalPlayer.Name]
+    end)
+    
+    if success and playerData and playerData.currency then
+        local currentBucks = playerData.currency.bucks or 0
+        if currentBucks >= skipPrice then
+            return true, skipPrice
+        else
+            print("❌ Not enough bucks. Have:", currentBucks, "Need:", skipPrice)
+            return false, skipPrice
+        end
+    end
+    
+    return false, skipPrice
+end
+
+local function skipRecycler(ClientData)
+    local canSkip, skipPrice = canSkipRecycler(ClientData)
+    
+    if not canSkip then
+        return false
+    end
+    
+    local furnitureUnique = getFurnitureUnique_recycle_shit()
+    if not furnitureUnique then
+        warn("⚠️ Could not find recycler furniture")
+        return false
+    end
+    
+    print("⚡ Attempting to skip recycler for", skipPrice, "bucks...")
+    
+    local success = pcall(function()
+        local args = {
+            furnitureUnique,
+            "UseBlock",
+            {
+                action = "skip"
+            },
+            Players.LocalPlayer.Character
+        }
+        ReplicatedStorage:WaitForChild("API"):WaitForChild("HousingAPI/ActivateInteriorFurniture"):InvokeServer(unpack(args))
+        return true
+    end)
+    
+    if success then
+        totalBucksSpent = totalBucksSpent + skipPrice
+        print("✅ Successfully skipped recycler for", skipPrice, "bucks. Total spent:", totalBucksSpent)
+        
+        if Config.RecycleWebhook and Config.RecycleWebhook ~= "" then
+            SendInfoMessage(Config.RecycleWebhook, "✅ Skipped recycler for " .. skipPrice .. " bucks. Total spent: " .. totalBucksSpent)
+        end
+        return true
+    else
+        print("❌ Failed to skip recycler")
+        return false
+    end
+end
+
+-- Recycling Functions
 local function get_pet_rarity(kind)
-    -- Your existing rarity detection logic here
-    return "common" -- Placeholder
+    return "common" -- Placeholder - implement your logic
 end
 
 local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
@@ -121,7 +208,18 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
         warn("⚠️ AutoReleasePet is disabled or Config not found")
         return 
     end
-    if not (Config.common or Config.uncommon or Config.rare or Config.ultra_rare) then
+    
+    local hasEnabledRarity = false
+    for rarity, value in pairs(Config) do
+        if (rarity == "common" or rarity == "uncommon" or rarity == "rare" or rarity == "ultra_rare") then
+            if value ~= false then
+                hasEnabledRarity = true
+                break
+            end
+        end
+    end
+    
+    if not hasEnabledRarity then
         warn("⚠️ No rarity selected")
         return
     end
@@ -137,6 +235,29 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
 
     local chosen, uniques, total, count = {}, {}, 0, 0
 
+    local function shouldRecyclePet(petKind, rarity)
+        local configValue = Config[rarity]
+        
+        if configValue == false then
+            return false
+        end
+        
+        if configValue == true or configValue == "all" then
+            return true
+        end
+        
+        if type(configValue) == "table" then
+            for _, allowedKind in ipairs(configValue) do
+                if string.lower(tostring(petKind)) == string.lower(tostring(allowedKind)) then
+                    return true
+                end
+            end
+            return false
+        end
+        
+        return false
+    end
+
     for _, pet in pairs(playerPets) do
         if pet and pet.unique and pet.unique ~= "practice_dog" and not string.match(pet.kind or "", "_egg$") then
             if pet.unique == farming_pet_unique or pet.unique == second_farming_pet_unique then
@@ -144,7 +265,7 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
             end
             
             local rarity = get_pet_rarity(pet.kind)
-            if rarity and Config[rarity] then
+            if rarity and shouldRecyclePet(pet.kind, rarity) then
                 local success2, value = pcall(function()
                     return PetRecyclerCalculator.get_pet_value(pet)
                 end)
@@ -264,96 +385,14 @@ local function search_recycle_quest(ClientData)
     end
 end
 
--- NEW PAY-TO-SKIP FUNCTIONS (added without breaking existing code)
-local function getSkipPrice(ClientData)
-    local success, manager = pcall(function()
-        return ClientData.get("pet_recycler_manager")
-    end)
-    if success and manager then
-        return manager["skip_price"] or 0
-    end
-    return 0
-end
-
-local function canSkipRecycler(ClientData)
-    if not Config.PayToSkip then
-        return false
-    end
-    
-    local skipPrice = getSkipPrice(ClientData)
-    
-    if skipPrice > Config.MaxBucksPerSkip then
-        print("❌ Skip price too high:", skipPrice, ">", Config.MaxBucksPerSkip)
-        return false
-    end
-    
-    local success, playerData = pcall(function()
-        return ClientData.get_data()[Players.LocalPlayer.Name]
-    end)
-    
-    if success and playerData and playerData.currency then
-        local currentBucks = playerData.currency.bucks or 0
-        if currentBucks >= skipPrice then
-            return true, skipPrice
-        else
-            print("❌ Not enough bucks. Have:", currentBucks, "Need:", skipPrice)
-            return false, skipPrice
-        end
-    end
-    
-    return false, skipPrice
-end
-
-local function skipRecycler(ClientData)
-    local canSkip, skipPrice = canSkipRecycler(ClientData)
-    
-    if not canSkip then
-        return false
-    end
-    
-    local furnitureUnique = getFurnitureUnique_recycle_shit()
-    if not furnitureUnique then
-        warn("⚠️ Could not find recycler furniture")
-        return false
-    end
-    
-    print("⚡ Attempting to skip recycler for", skipPrice, "bucks...")
-    
-    local success = pcall(function()
-        local args = {
-            furnitureUnique,
-            "UseBlock",
-            {
-                action = "skip"
-            },
-            Players.LocalPlayer.Character
-        }
-        ReplicatedStorage:WaitForChild("API"):WaitForChild("HousingAPI/ActivateInteriorFurniture"):InvokeServer(unpack(args))
-        return true
-    end)
-    
-    if success then
-        totalBucksSpent = totalBucksSpent + skipPrice
-        print("✅ Successfully skipped recycler for", skipPrice, "bucks. Total spent:", totalBucksSpent)
-        
-        if Config.RecycleWebhook and Config.RecycleWebhook ~= "" then
-            SendInfoMessage(Config.RecycleWebhook, "✅ Skipped recycler for " .. skipPrice .. " bucks. Total spent: " .. totalBucksSpent)
-        end
-        return true
-    else
-        print("❌ Failed to skip recycler")
-        return false
-    end
-end
-
--- UPDATED MAIN LOGIC (with pay-to-skip added)
+-- Main Logic
 local function main_logic_recycle_shit(ClientData)
     local recyclerManager = ClientData.get("pet_recycler_manager")
+    
     if isBusy(recyclerManager) then
         print("Recycler is busy...")
         print(getReadyTime(recyclerManager))
         
-        -- NEW: Check skip price and try to skip
         local currentSkipPrice = getSkipPrice(ClientData)
         print("💰 Current skip price:", currentSkipPrice, "bucks")
         
@@ -362,18 +401,18 @@ local function main_logic_recycle_shit(ClientData)
         end
         
         if Config.RecycleWebhook and Config.RecycleWebhook ~= "" then
-            SendInfoMessage(Config.RecycleWebhook, getReadyTime(recyclerManager))
+            SendInfoMessage(Config.RecycleWebhook, getReadyTime(recyclerManager) .. " | Skip price: " .. currentSkipPrice .. " bucks")
         end
     else
         print("Recycler is idle!")
         search_recycle_quest(ClientData)
         task.wait(1)
         check_if_enough_point(ClientData)
+        
         if isBusy(recyclerManager) then
-            print("Recycler is busy...")
+            print("Recycler is now busy after recycling...")
             print(getReadyTime(recyclerManager))
             
-            -- NEW: Try to skip if it just became busy
             if Config.PayToSkip then
                 skipRecycler(ClientData)
             end
@@ -402,7 +441,7 @@ local function startRecyclerAutomation()
         end
         
         print("🔄 Waiting 60 seconds before next check...")
-        task.wait(60)
+        task.wait(60) -- Wait 1 minute before next cycle
     end
 end
 
