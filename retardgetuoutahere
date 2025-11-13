@@ -418,7 +418,6 @@ local function main_logic_recycle_shit(ClientData)
             end
         end
         task.wait(1)
-        tp_main_map()
     end
 end
 
