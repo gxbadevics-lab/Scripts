@@ -259,7 +259,7 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
     end
 
     for _, pet in pairs(playerPets) do
-        if pet and pet.unique and pet.unique ~= "practice_dog" and not string.match(pet.kind or "", "_egg$") then
+        if pet and pet.unique and pet.kind ~= "practice_dog" and not string.match(pet.kind or "", "_egg$") then
             if pet.unique == farming_pet_unique or pet.unique == second_farming_pet_unique then
                 continue
             end
