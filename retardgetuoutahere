@@ -6,6 +6,22 @@ local Players = game:GetService("Players")
 local totalBucksSpent = 0
 local farming_pet_unique, second_farming_pet_unique = nil, nil
 
+-- MISSING FUNCTION PLACEHOLDERS
+local function goto_zone(zone)
+    print("📍 Would teleport to zone:", zone)
+    -- Add your actual zone navigation logic here
+end
+
+local function tp_main_map()
+    print("📍 Would teleport to main map")
+    -- Add your actual teleport logic here
+end
+
+local function SendInfoMessage(webhook, message)
+    print("📧 Webhook Message:", message)
+    -- Add your actual Discord webhook logic here
+end
+
 -- Startup Sequence
 local function startupChecks()
     print("🔍 Starting startup checks...")
@@ -259,9 +275,12 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
     end
 
     for _, pet in pairs(playerPets) do
+        -- FIXED: Changed pet.unique ~= "practice_dog" to pet.kind ~= "practice_dog"
         if pet and pet.unique and pet.kind ~= "practice_dog" and not string.match(pet.kind or "", "_egg$") then
+            -- FIXED: Replaced 'continue' with proper Lua syntax
             if pet.unique == farming_pet_unique or pet.unique == second_farming_pet_unique then
-                continue
+                -- Skip to next iteration (equivalent to continue)
+                goto continue
             end
             
             local rarity = get_pet_rarity(pet.kind)
@@ -281,6 +300,7 @@ local function try_recycle_5000_point_pets(ClientData, PetRecyclerCalculator)
                 end
             end
         end
+        ::continue::
     end
 
     if #chosen == 0 then 
@@ -418,6 +438,7 @@ local function main_logic_recycle_shit(ClientData)
             end
         end
         task.wait(1)
+        tp_main_map()
     end
 end
 
